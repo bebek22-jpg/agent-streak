@@ -33,7 +33,7 @@
 <body>
 <main>
   <h1>🔥 AgentStreak</h1>
-  <p class="sub">A free daily check-in for Agent ID holders on BNB Chain. One check-in per day, gas only. Build your streak, prove you're active. No token, no fees, no owner — just a streak.</p>
+  <p class="sub">A free daily check-in for Agent ID holders on BNB Chain. One check-in per day, gas only. Build your streak, prove you're active. Plus a free Founding Badge NFT — one per Agent ID, forever. No token, no fees, no owner.</p>
 
   <div class="card">
     <div class="row">
@@ -59,6 +59,20 @@
   </div>
 
   <div class="card">
+    <h3 style="margin:0 0 4px">🏅 Founding Badge — free NFT</h3>
+    <p class="muted" style="margin:0 0 16px">One free badge per Agent ID, minted once, yours forever. Fully on-chain artwork — no IPFS, no external host. Gas only.</p>
+    <div class="row">
+      <div class="stat"><div class="num" id="badgeMinted">–</div><div class="lbl">badges minted</div></div>
+      <div class="stat"><div class="num">10,000</div><div class="lbl">max supply</div></div>
+      <div class="stat"><div class="num" id="myBadge">–</div><div class="lbl">my badge</div></div>
+    </div>
+    <div style="margin-top:16px">
+      <button id="mintBtn" disabled>Connect your wallet to mint</button>
+    </div>
+    <div id="badgeStatus" style="min-height:20px;margin-top:12px;font-size:14px"></div>
+  </div>
+
+  <div class="card">
     <h3 style="margin:0 0 8px">Top streaks</h3>
     <table><thead><tr><th>Agent</th><th>Best streak</th><th>Check-ins</th></tr></thead>
     <tbody id="leaderboard"><tr><td colspan="3" class="muted">Loading…</td></tr></tbody></table>
@@ -71,15 +85,18 @@
   </div>
 
   <footer class="muted">
-    <p>Contract: <a class="mono" href="https://bscscan.com/address/0x8eCd85A1d5ED398183699B8C07EE42C344046019" target="_blank" rel="noopener">0x8eCd85A1d5ED398183699B8C07EE42C344046019</a> (BNB Chain, verified on Sourcify, exact match)</p>
+    <p>Check-in contract: <a class="mono" href="https://bscscan.com/address/0x8eCd85A1d5ED398183699B8C07EE42C344046019" target="_blank" rel="noopener">0x8eCd85A1d5ED398183699B8C07EE42C344046019</a> (BNB Chain, verified on BscScan + Sourcify, exact match)</p>
+    <p>Badge contract: <a class="mono" href="https://bscscan.com/address/0xC34c1eA7b3a0bea3AE9e473e645D172900e63748" target="_blank" rel="noopener">0xC34c1eA7b3a0bea3AE9e473e645D172900e63748</a> (BNB Chain, verified on Sourcify, exact match)</p>
     <p>Agent ID registry: <a class="mono" href="https://bscscan.com/address/0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F" target="_blank" rel="noopener">0x60B9…022F</a> · <a href="https://github.com/bebek22-jpg/agent-streak" target="_blank" rel="noopener">Source code (MIT)</a></p>
     <p>Built for the Binance Agent ID Hackathon. Check-in is free — you only pay BNB gas (~0.000006 BNB). This project is not affiliated with Binance.</p>
   </footer>
 </main>
 <script>
 const CONTRACT = "0x8eCd85A1d5ED398183699B8C07EE42C344046019";
+const BADGE = "0xC34c1eA7b3a0bea3AE9e473e645D172900e63748";
 const REGISTRY = "0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F";
 const DEPLOY_BLOCK = 134459422;
+const BADGE_DEPLOY_BLOCK = 134467040;
 const RPCS = ["https://bsc-dataseed.binance.org/", "https://bsc-rpc.publicnode.com"];
 const SEL = {
   streaks: "0x79fd9365",
@@ -88,9 +105,13 @@ const SEL = {
   currentDay: "0x5c9302c9",
   hasCheckedInToday: "0x3504f52b",
   balanceOf: "0x70a08231",
-  checkIn: "0x183ff085"
+  checkIn: "0x183ff085",
+  mint: "0x1249c58b",
+  hasMinted: "0x38e21cce",
+  badgeTotalSupply: "0x18160ddd"
 };
 const TOPIC_CHECKED_IN = "0x839c08e79bb08c1b4ef50f676b1920a0f06514113d2cb6f469ca462759184895";
+const TOPIC_TRANSFER = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 
 let account = null;
 
@@ -131,8 +152,41 @@ async function loadTotals() {
   } catch (e) { console.error(e); }
 }
 
-async function loadMyStreak() {
+async function loadBadge() {
+  try {
+    const supply = await call(BADGE, SEL.badgeTotalSupply);
+    $("badgeMinted").textContent = toNum(supply);
+  } catch (e) { console.error(e); }
   if (!account) return;
+  try {
+    const [mintedHex, idHex] = await Promise.all([
+      call(BADGE, SEL.hasMinted + pad32(account)),
+      call(REGISTRY, SEL.balanceOf + pad32(account)),
+    ]);
+    const hasMinted = toNum(mintedHex) > 0;
+    const hasId = toNum(idHex) > 0;
+    const btn = $("mintBtn");
+    if (hasMinted) {
+      btn.disabled = true; btn.textContent = "Badge already minted ✓";
+      // Find our token id from the mint Transfer event.
+      try {
+        const logs = await rpc("eth_getLogs", [{ fromBlock: "0x" + BADGE_DEPLOY_BLOCK.toString(16), toBlock: "latest", address: BADGE, topics: [TOPIC_TRANSFER, "0x0000000000000000000000000000000000000000000000000000000000000000", "0x" + pad32(account)] }]);
+        if (logs.length) {
+          const tokenId = Number(BigInt(logs[0].topics[3]));
+          $("myBadge").innerHTML = '<a href="https://bscscan.com/token/' + BADGE + '?a=' + tokenId + '" target="_blank" rel="noopener">#' + tokenId + '</a>';
+        } else { $("myBadge").textContent = "minted"; }
+      } catch (e) { console.error(e); $("myBadge").textContent = "minted"; }
+    } else if (!hasId) {
+      btn.disabled = true; btn.textContent = "Agent ID required to mint";
+      $("myBadge").textContent = "–";
+    } else {
+      btn.disabled = false; btn.textContent = "Mint free badge";
+      $("myBadge").textContent = "not yet";
+    }
+  } catch (e) { console.error(e); }
+}
+
+async function loadMyStreak() {  if (!account) return;
   try {
     const [streakHex, hasTodayHex, idHex] = await Promise.all([
       call(CONTRACT, SEL.streaks + pad32(account)),
@@ -205,6 +259,7 @@ async function connect() {
     $("connectBtn").textContent = "Connected ✓";
     $("connectBtn").disabled = true;
     await loadMyStreak();
+    await loadBadge();
   } catch (e) { console.error(e); $("status").innerHTML = '<span class="err">Connection failed: ' + (e.message || e) + '</span>'; }
 }
 
@@ -220,13 +275,27 @@ async function checkIn() {
   } catch (e) { console.error(e); $("status").innerHTML = '<span class="err">Check-in failed: ' + (e.message || e) + '</span>'; btn.disabled = false; btn.textContent = "Check in for today"; }
 }
 
+async function mintBadge() {
+  if (!account) return;
+  const btn = $("mintBtn");
+  btn.disabled = true; btn.textContent = "Waiting for confirmation…";
+  try {
+    const txHash = await window.ethereum.request({ method: "eth_sendTransaction",
+      params: [{ from: account, to: BADGE, data: SEL.mint }] });
+    $("badgeStatus").innerHTML = 'Mint sent! <a href="https://bscscan.com/tx/' + txHash + '" target="_blank" rel="noopener">View on BscScan</a> — refreshing in a few seconds…';
+    setTimeout(async () => { await loadBadge(); }, 8000);
+  } catch (e) { console.error(e); $("badgeStatus").innerHTML = '<span class="err">Mint failed: ' + (e.message || e) + '</span>'; btn.disabled = false; btn.textContent = "Mint free badge"; }
+}
+
 $("connectBtn").addEventListener("click", connect);
 $("checkinBtn").addEventListener("click", checkIn);
+$("mintBtn").addEventListener("click", mintBadge);
 if (window.ethereum) {
-  window.ethereum.on("accountsChanged", a => { account = a[0] || null; if (account) { $("account").textContent = "Connected: " + account; loadMyStreak(); } });
+  window.ethereum.on("accountsChanged", a => { account = a[0] || null; if (account) { $("account").textContent = "Connected: " + account; loadMyStreak(); loadBadge(); } });
   window.ethereum.on("chainChanged", () => window.location.reload());
 }
 loadTotals();
+loadBadge();
 loadEvents();
 </script>
 </body>
