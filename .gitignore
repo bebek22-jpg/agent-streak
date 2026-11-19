@@ -1,0 +1,7 @@
+# Foundry build outputs
+out/
+# Broadcast logs and script cache — cache/ contains sensitive values (private key), never commit
+broadcast/
+cache/
+# Local notes
+.DS_Store
