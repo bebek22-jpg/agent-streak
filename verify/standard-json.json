@@ -1,0 +1,30 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "src/AgentStreak.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.24;\n\n/// @title AgentStreak\n/// @notice Free daily check-in for Binance Agent ID holders on BNB Chain.\n/// @dev No owner, no fees, no token, no admin functions. The only gate is\n///      holding an Agent ID (SPACE ID Agent ID registry, ERC-721, non-transferable).\n///      One check-in per UTC day per address. Streaks count consecutive UTC days.\n///      Built for the Binance Agent ID Hackathon (Nov\u2013Dec 2026).\ninterface IAgentIDRegistry {\n    function balanceOf(address owner) external view returns (uint256);\n}\n\ncontract AgentStreak {\n    IAgentIDRegistry public constant AGENT_ID =\n        IAgentIDRegistry(0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F);\n\n    struct Streak {\n        uint64 lastDay;\n        uint32 currentStreak;\n        uint32 bestStreak;\n        uint32 totalCheckIns;\n    }\n\n    mapping(address => Streak) public streaks;\n    uint256 public totalCheckIns;\n    uint256 public totalAgents;\n\n    event CheckedIn(address indexed agent, uint64 indexed day, uint32 streak, uint32 total);\n\n    error NotAgentIDHolder();\n    error AlreadyCheckedInToday();\n\n    /// @notice Current UTC day number (days since Unix epoch).\n    function currentDay() public view returns (uint64) {\n        return uint64(block.timestamp / 1 days);\n    }\n\n    /// @notice Check in for today. Requires holding an Agent ID. Gas only, no fee.\n    function checkIn() external {\n        if (AGENT_ID.balanceOf(msg.sender) == 0) revert NotAgentIDHolder();\n        uint64 today = currentDay();\n        Streak storage s = streaks[msg.sender];\n        // totalCheckIns > 0 distinguishes \"never checked in\" (lastDay == 0)\n        // from \"checked in on day 0\".\n        if (s.totalCheckIns > 0 && s.lastDay == today) revert AlreadyCheckedInToday();\n\n        if (s.totalCheckIns > 0 && s.lastDay == today - 1) {\n            s.currentStreak += 1;\n        } else {\n            s.currentStreak = 1;\n        }\n        if (s.currentStreak > s.bestStreak) s.bestStreak = s.currentStreak;\n        s.totalCheckIns += 1;\n        s.lastDay = today;\n        if (s.totalCheckIns == 1) totalAgents += 1;\n        totalCheckIns += 1;\n\n        emit CheckedIn(msg.sender, today, s.currentStreak, s.totalCheckIns);\n    }\n\n    /// @notice True if `agent` already checked in today.\n    function hasCheckedInToday(address agent) external view returns (bool) {\n        Streak storage s = streaks[agent];\n        return s.totalCheckIns > 0 && s.lastDay == currentDay();\n    }\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun",
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "remappings": [
+      "forge-std/=lib/forge-std/src/"
+    ],
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "evm.deployedBytecode"
+        ]
+      }
+    }
+  }
+}
